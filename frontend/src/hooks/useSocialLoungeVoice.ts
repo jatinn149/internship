@@ -6,6 +6,7 @@ interface UseSocialLoungeVoiceOptions {
   socket: Socket | null;
   selfUserId: string | null;
   currentRoomId: RoomId;
+  connectedPeerIds: string[];
 }
 
 interface SocialVoiceParticipantsPayload {
@@ -83,6 +84,7 @@ export const useSocialLoungeVoice = ({
   socket,
   selfUserId,
   currentRoomId,
+  connectedPeerIds,
 }: UseSocialLoungeVoiceOptions): UseSocialLoungeVoiceResult => {
   const [micEnabled, setMicEnabled] = useState(false);
   const [isTogglingMic, setIsTogglingMic] = useState(false);
@@ -281,10 +283,13 @@ export const useSocialLoungeVoice = ({
         localStreamRef.current.getTracks().forEach((track) => {
           peerConnection.addTrack(track, localStreamRef.current as MediaStream);
         });
+      } else {
+        // Listen-only users still need an audio transceiver to receive remote voice.
+        peerConnection.addTransceiver("audio", { direction: "recvonly" });
       }
 
       peerConnection.onicecandidate = (event) => {
-        if (!event.candidate || !socket || !micEnabledRef.current) {
+        if (!event.candidate || !socket) {
           return;
         }
 
@@ -404,7 +409,7 @@ export const useSocialLoungeVoice = ({
     };
 
     const handleSocialVoiceOffer = async ({ fromUserId, sdp }: SocialVoiceOfferEvent) => {
-      if (!micEnabledRef.current || !socket) {
+      if (!socket || !isInSocialLounge) {
         return;
       }
 
@@ -471,10 +476,10 @@ export const useSocialLoungeVoice = ({
       socket.off("social-voice-ice-candidate", handleSocialVoiceIceCandidate);
       socket.off("disconnect", handleDisconnect);
     };
-  }, [clearSpeakingSnapshot, closePeerConnection, createOrGetPeerConnection, disableMic, socket]);
+  }, [clearSpeakingSnapshot, closePeerConnection, createOrGetPeerConnection, disableMic, isInSocialLounge, socket]);
 
   useEffect(() => {
-    if (!micEnabled || !socket || !selfUserId) {
+    if (!socket || !selfUserId || !isInSocialLounge) {
       closeAllPeerConnections();
       stopSpeakingLoop();
       speakingUntilByUserRef.current.clear();
@@ -482,7 +487,10 @@ export const useSocialLoungeVoice = ({
       return;
     }
 
-    const peerIds = voiceEnabledUserIds.filter((userId) => userId !== selfUserId);
+    const connectedPeerSet = new Set(connectedPeerIds);
+    const peerIds = voiceEnabledUserIds.filter((userId) => {
+      return userId !== selfUserId && connectedPeerSet.has(userId);
+    });
     const peerIdSet = new Set(peerIds);
 
     Array.from(peerConnectionsRef.current.keys()).forEach((existingPeerId) => {
@@ -493,7 +501,17 @@ export const useSocialLoungeVoice = ({
 
     peerIds.forEach((peerUserId) => {
       const peerConnection = createOrGetPeerConnection(peerUserId);
-      const shouldInitiateOffer = selfUserId.localeCompare(peerUserId) < 0;
+      const selfCanSpeak = micEnabled;
+      const peerCanSpeak = voiceEnabledUserIds.includes(peerUserId);
+
+      let shouldInitiateOffer = false;
+
+      if (selfCanSpeak && peerCanSpeak) {
+        shouldInitiateOffer = selfUserId.localeCompare(peerUserId) < 0;
+      } else if (!selfCanSpeak && peerCanSpeak) {
+        // Listen-only users proactively connect to active speakers.
+        shouldInitiateOffer = true;
+      }
 
       if (!shouldInitiateOffer || offerCreatedForPeerRef.current.has(peerUserId)) {
         return;
@@ -522,10 +540,6 @@ export const useSocialLoungeVoice = ({
 
     stopSpeakingLoop();
     speakingLoopIntervalRef.current = window.setInterval(() => {
-      if (!micEnabledRef.current) {
-        return;
-      }
-
       const now = Date.now();
 
       if (selfUserId && localAudioMonitorRef.current && hasAudioActivity(localAudioMonitorRef.current)) {
@@ -541,6 +555,9 @@ export const useSocialLoungeVoice = ({
       const activeSpeakerIds = Array.from(speakingUntilByUserRef.current.entries())
         .filter(([, speakingUntil]) => speakingUntil > now)
         .map(([userId]) => userId)
+        .filter((userId) => {
+          return userId === selfUserId || connectedPeerSet.has(userId);
+        })
         .filter((userId) => voiceEnabledUserIds.includes(userId))
         .sort((first, second) => first.localeCompare(second));
 
@@ -563,7 +580,9 @@ export const useSocialLoungeVoice = ({
     closeAllPeerConnections,
     closePeerConnection,
     createOrGetPeerConnection,
+    connectedPeerIds,
     micEnabled,
+    isInSocialLounge,
     selfUserId,
     socket,
     stopSpeakingLoop,

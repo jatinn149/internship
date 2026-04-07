@@ -128,11 +128,19 @@ export const CosmosPage = () => {
       }));
   }, [usersWithRooms]);
 
+  const { connectedPeerIds, activePeerId, activeRoomId, setActivePeerId } = useProximity({
+    socket,
+    selfUserId,
+    users: renderUsers,
+    selfPosition: position,
+  });
+
   const { isVoiceSupported, micEnabled, isTogglingMic, voiceError, voiceEnabledUserIds, speakingUserIds, toggleMic } =
     useSocialLoungeVoice({
       socket,
       selfUserId,
       currentRoomId: currentRoom.id,
+      connectedPeerIds,
     });
 
   const {
@@ -158,7 +166,12 @@ export const CosmosPage = () => {
   }, [usersWithRooms]);
 
   const socialVoiceParticipants = useMemo(() => {
-    return voiceEnabledUserIds.map((userId) => {
+    const allowedUserIds = new Set(connectedPeerIds);
+    if (selfUserId) {
+      allowedUserIds.add(selfUserId);
+    }
+
+    return voiceEnabledUserIds.filter((userId) => allowedUserIds.has(userId)).map((userId) => {
       const matchedUser = usersWithRooms.find((user) => user.id === userId);
 
       return {
@@ -166,14 +179,7 @@ export const CosmosPage = () => {
         displayName: matchedUser?.displayName || userId,
       };
     });
-  }, [usersWithRooms, voiceEnabledUserIds]);
-
-  const { connectedPeerIds, activePeerId, activeRoomId, setActivePeerId } = useProximity({
-    socket,
-    selfUserId,
-    users: renderUsers,
-    selfPosition: position,
-  });
+  }, [connectedPeerIds, selfUserId, usersWithRooms, voiceEnabledUserIds]);
 
   const visibleMessages = useMemo(() => {
     if (!activeRoomId) {

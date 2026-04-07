@@ -372,13 +372,34 @@ export const registerSocketHandlers = (io: Server, state: CosmosState): void => 
     return true;
   };
 
-  const canUseSocialVoice = (userId: string): boolean => {
+  const canListenSocialVoice = (userId: string): boolean => {
     const user = state.getUserByUserId(userId);
     if (!user) {
       return false;
     }
 
-    return isInSocialLounge(user.position) && socialVoiceEnabledUserIds.has(userId);
+    return isInSocialLounge(user.position);
+  };
+
+  const canSpeakSocialVoice = (userId: string): boolean => {
+    return canListenSocialVoice(userId) && socialVoiceEnabledUserIds.has(userId);
+  };
+
+  const canRouteSocialVoiceBetween = (sourceUserId: string, targetUserId: string): boolean => {
+    if (sourceUserId === targetUserId) {
+      return false;
+    }
+
+    if (!canListenSocialVoice(sourceUserId) || !canListenSocialVoice(targetUserId)) {
+      return false;
+    }
+
+    if (!state.areUsersConnected(sourceUserId, targetUserId)) {
+      return false;
+    }
+
+    // At least one side must be actively speaking-enabled for a valid voice route.
+    return canSpeakSocialVoice(sourceUserId) || canSpeakSocialVoice(targetUserId);
   };
 
   const getArenaUserIds = (): string[] => {
@@ -1105,7 +1126,7 @@ export const registerSocketHandlers = (io: Server, state: CosmosState): void => 
         return;
       }
 
-      if (!canUseSocialVoice(currentUser.userId) || !canUseSocialVoice(targetUserId)) {
+      if (!canRouteSocialVoiceBetween(currentUser.userId, targetUserId)) {
         return;
       }
 
@@ -1126,7 +1147,7 @@ export const registerSocketHandlers = (io: Server, state: CosmosState): void => 
         return;
       }
 
-      if (!canUseSocialVoice(currentUser.userId) || !canUseSocialVoice(targetUserId)) {
+      if (!canRouteSocialVoiceBetween(currentUser.userId, targetUserId)) {
         return;
       }
 
@@ -1147,7 +1168,7 @@ export const registerSocketHandlers = (io: Server, state: CosmosState): void => 
         return;
       }
 
-      if (!canUseSocialVoice(currentUser.userId) || !canUseSocialVoice(targetUserId)) {
+      if (!canRouteSocialVoiceBetween(currentUser.userId, targetUserId)) {
         return;
       }
 

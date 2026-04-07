@@ -1,11 +1,20 @@
 import cors from "cors";
 import express from "express";
+import { createOriginChecker } from "./utils/cors";
 
 const app = express();
+const isAllowedOrigin = createOriginChecker();
 
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`CORS blocked for origin: ${origin ?? "unknown"}`));
+    },
     methods: ["GET", "POST"],
     credentials: true,
   })
